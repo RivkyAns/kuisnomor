@@ -416,8 +416,8 @@ button { font: inherit; cursor: pointer; }
     <div class="send-box">
       <h3>📤 Send your answers to your teacher</h3>
       <ol class="steps">
-        <li>Press <b>Download my answers</b>. Your answers are saved as an image (PNG).</li>
-        <li>Press <b>Send via WhatsApp</b> and send the image to your teacher.</li>
+        <li>Press <b>Download my answers</b>. Your answers are saved as a <b>PDF file</b>. You can still open the PDF and edit your writing answers before you send it.</li>
+        <li>Press <b>Send via WhatsApp</b> and send the PDF file to your teacher.</li>
       </ol>
       <div class="btn-row">
         <button class="btn btn-primary" type="button" id="dlBtn">⬇️ Download my answers</button>
@@ -501,6 +501,7 @@ button { font: inherit; cursor: pointer; }
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script>
 // ---------- Questions ----------
 // Each question plays its recorded clip (AUDIO_CLIPS, cut from the teacher's recording).
@@ -656,67 +657,81 @@ function setWaLink() {
   const msg = `Halo Pak Guru, ini jawaban Kuis Nomor saya.\n\n${answersText()}`;
   $("waLink").href = (WA_NUMBER ? `https://wa.me/${WA_NUMBER}` : "https://wa.me/") + "?text=" + encodeURIComponent(msg);
 }
-function makeAnswerImage() {
-  const W = 1080, X0 = 400, maxW = W - X0 - 90;
-  const disp = '"Bricolage Grotesque", "Trebuchet MS", sans-serif', body = '"Figtree", "Segoe UI", sans-serif';
-  const meas = document.createElement("canvas").getContext("2d"); meas.font = `600 30px ${body}`;
-  const wrap = t => { const out = []; let line = ""; t.split(/\s+/).forEach(w => { const tryL = line ? line + " " + w : w; if (meas.measureText(tryL).width > maxW && line) { out.push(line); line = w; } else line = tryL; }); out.push(line); return out; };
-  const rows = lastAnswers.map(a => ({ a, lines: a.ans ? wrap(a.ans) : ["(kosong / empty)"] }));
-  rows.forEach(r => r.h = 74 + (r.lines.length - 1) * 38);
-  const wrong = wrongList(), listY = 420, wrongLines = wrong.length ? wrong : ["Semua jawaban benar! 🎉"];
-  const wHead = listY + wrongLines.length * 44 + 60, top = wHead + 35;
-  const H = top + rows.reduce((s, r) => s + r.h, 0) + 140;
-  const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const g = cv.getContext("2d");
-  g.fillStyle = "#f6f3fb"; g.fillRect(0, 0, W, H);
-  g.fillStyle = "#ffffff"; g.beginPath(); g.roundRect(40, 40, W - 80, H - 80, 36); g.fill();
-  g.fillStyle = "#5b3fd1"; g.font = `800 30px ${body}`; g.fillText("BAHASA INDONESIA · KUIS NOMOR", 90, 120);
-  g.fillStyle = "#241f33"; g.font = `800 64px ${disp}`; g.fillText("Jawaban " + name, 90, 200, W - 180);
-  const ok = results.filter(r => r.ok).length;
-  g.font = `600 32px ${body}`; g.fillStyle = "#6b6480";
-  g.fillText(new Date().toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" }), 90, 255);
-  g.fillStyle = "#241f33"; g.font = `800 38px ${disp}`; g.fillText("🎧 Listening Practice", 90, 320);
-  g.font = `700 32px ${body}`; g.fillStyle = "#1f9d55"; g.fillText(`Benar: ${ok}`, 90, 372);
-  g.fillStyle = "#d42a2a"; g.fillText(`Salah: ${results.length - ok}`, 290, 372);
-  g.fillStyle = "#6b6480"; g.fillText(`(dari ${QUESTIONS.length} soal)`, 490, 372);
-  g.font = `600 28px ${body}`;
-  wrongLines.forEach((t, i) => {
-    const y = listY + i * 44 + 22;
-    if (wrong.length) { g.fillStyle = "#d42a2a"; g.beginPath(); g.arc(102, y - 9, 7, 0, Math.PI * 2); g.fill(); }
-    g.fillStyle = "#241f33"; g.fillText(t, wrong.length ? 122 : 90, y, W - 220);
+// Editable PDF of the answers (writing answers are form fields the student can edit later).
+async function makeAnswerPdf() {
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  // Standard PDF fonts only cover Latin text: replace anything else (emoji, other scripts).
+  const clean = s => String(s).replace(/[–—]/g, "-").replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
+    .normalize("NFC").replace(/[^\x20-\x7E -ÿ]/g, "");
+  const doc = await PDFDocument.create();
+  doc.setTitle("Jawaban Kuis Nomor - " + clean(name));
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const form = doc.getForm();
+  const C = { ink: rgb(.14, .12, .2), muted: rgb(.42, .39, .5), accent: rgb(.36, .25, .82), ok: rgb(.12, .62, .33), bad: rgb(.83, .16, .16), row: rgb(.965, .953, .984), border: rgb(.73, .76, .98) };
+  const badge = [rgb(.42, .42, 1), rgb(1, .36, .62), rgb(1, .64, .06), rgb(.08, .66, .94)];
+  const W = 595.28, H = 841.89, M = 50;
+  let page = doc.addPage([W, H]), y = H - M;
+  const need = h => { if (y - h < M) { page = doc.addPage([W, H]); y = H - M; } };
+  const text = (t, x, size, f = font, color = C.ink) => page.drawText(clean(t), { x, y, size, font: f, color });
+
+  text("BAHASA INDONESIA - KUIS NOMOR", M, 10, bold, C.accent); y -= 30;
+  text("Jawaban " + name, M, 24, bold); y -= 20;
+  text(new Date().toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" }), M, 11, font, C.muted); y -= 34;
+
+  const ok = results.filter(r => r.ok).length, wrong = wrongList();
+  text("Part 1 - Listening Practice", M, 15, bold); y -= 20;
+  text(`Benar: ${ok}`, M, 12, bold, C.ok); text(`Salah: ${results.length - ok}`, M + 80, 12, bold, C.bad);
+  text(`(dari ${QUESTIONS.length} soal)`, M + 160, 12, font, C.muted); y -= 20;
+  if (wrong.length) {
+    text("Jawaban yang salah:", M, 11, bold); y -= 16;
+    wrong.forEach(t => { need(16); page.drawCircle({ x: M + 4, y: y + 3.5, size: 2.5, color: C.bad }); text(t, M + 14, 11); y -= 16; });
+  } else { text("Semua jawaban benar!", M, 11, bold, C.ok); y -= 16; }
+  y -= 22;
+
+  need(60);
+  text("Part 2 - Writing Practice", M, 15, bold); y -= 16;
+  text("Tulislah nomor-nomor berikut dalam bentuk alfabet. (Write the numbers in words.)", M, 10, font, C.muted); y -= 13;
+  text("You can still edit your answers: click a box below and type.", M, 10, font, C.accent); y -= 18;
+
+  const rowH = 30, numX = M + 34, boxX = M + 120, boxW = W - M - boxX;
+  lastAnswers.forEach((a, i) => {
+    need(rowH);
+    const top = y, mid = top - rowH / 2;
+    if (i % 2 === 0) page.drawRectangle({ x: M - 6, y: top - rowH, width: W - 2 * M + 12, height: rowH, color: C.row });
+    page.drawCircle({ x: M + 10, y: mid, size: 10, color: badge[i % 4] });
+    const lw = bold.widthOfTextAtSize(a.letter, 10);
+    page.drawText(a.letter, { x: M + 10 - lw / 2, y: mid - 3.5, size: 10, font: bold, color: rgb(1, 1, 1) });
+    page.drawText(clean(a.num), { x: numX, y: mid - 4.5, size: 13, font: bold, color: C.ink });
+    const f = form.createTextField("jawaban_" + a.letter);
+    f.setText(clean(a.ans));
+    f.addToPage(page, { x: boxX, y: top - rowH + 4, width: boxW, height: rowH - 8, font, borderColor: C.border, borderWidth: 1, backgroundColor: rgb(1, 1, 1), textColor: C.ink });
+    f.setFontSize(11);
+    y -= rowH;
   });
-  g.fillStyle = "#241f33"; g.font = `800 38px ${disp}`; g.fillText("✍️ Writing Practice", 90, wHead);
-  const cols = ["#6b6bff", "#ff5c9d", "#ffa20f", "#14a9f0"];
-  let y = top;
-  rows.forEach((r, i) => {
-    const a = r.a, cy = y + 37;
-    if (i % 2 === 0) { g.fillStyle = "#f6f3fb"; g.fillRect(70, y, W - 140, r.h); }
-    g.fillStyle = cols[i % 4]; g.beginPath(); g.arc(115, cy, 24, 0, Math.PI * 2); g.fill();
-    g.fillStyle = "#fff"; g.font = `800 26px ${disp}`; g.textAlign = "center"; g.fillText(a.letter, 115, cy + 9); g.textAlign = "left";
-    g.fillStyle = "#241f33"; g.font = `800 32px ${disp}`; g.fillText(a.num, 165, cy + 11);
-    g.fillStyle = a.ans ? "#241f33" : "#9a93ad"; g.font = `${a.ans ? 600 : "italic 500"} 30px ${body}`;
-    r.lines.forEach((ln, k) => g.fillText(ln, X0, cy + 10 + k * 38));
-    y += r.h;
-  });
-  return new Promise(res => cv.toBlob(res, "image/png"));
+  form.updateFieldAppearances(font);
+  const bytes = await doc.save();
+  return new Blob([bytes], { type: "application/pdf" });
 }
 async function downloadAnswers() {
   const msg = $("dlMsg");
   try {
-    const blob = await makeAnswerImage();
-    const safe = name.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "murid";
-    const filename = `jawaban-kuis-nomor-${safe}.png`;
+    if (typeof PDFLib === "undefined") { msg.textContent = "The PDF tool did not load. Check your internet connection and try again, or use Copy my answers."; return; }
+    const blob = await makeAnswerPdf();
+    const safe = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "") || "murid";
+    const filename = `jawaban-kuis-nomor-${safe}.pdf`;
     if (!(window.claude && window.claude.use)) {
       // Normal website (GitHub Pages, Hostinger, …): plain browser download.
       const url = URL.createObjectURL(blob), a = document.createElement("a");
       a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
-      msg.textContent = "✅ Saved! Check your Downloads (or Photos), then press Send via WhatsApp and attach the image.";
+      msg.textContent = "✅ Saved! Check your Downloads (or Files), then press Send via WhatsApp and attach the PDF.";
       return;
     }
     const dl = await window.claude.use("downloads");
     if (!dl) { msg.textContent = "Download is not available here. Please use Copy my answers or take a screenshot."; return; }
     await dl.save({ filename, data: blob });
-    msg.textContent = "✅ Saved! Now press Send via WhatsApp and attach the image.";
+    msg.textContent = "✅ Saved! Now press Send via WhatsApp and attach the PDF.";
   } catch (e) {
     msg.textContent = e && e.code === "declined" ? "Download cancelled." : "Download is not available here. Please use Copy my answers or take a screenshot.";
   }
